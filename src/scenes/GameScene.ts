@@ -9,38 +9,46 @@ const WORLD_W = 3200;
 const WORLD_H = 540;
 const FALL_DEATH_Y = 720;
 
+// Difficoltà graduale. Salto reale di Pezz: ~134px orizzontali, ~79px verticali.
+// Fossi: 60 → 80 → 96 px (tutti ben sotto i 134). Ledge: ≤60px (sotto i 79).
+const GROUND_Y = 480;
 const PLATFORMS: [number, number, number, number][] = [
-  [0, 480, 900, 60],
-  [1100, 480, 1000, 60],
-  [2250, 480, 950, 60],
-  [520, 380, 160, 24],
-  [760, 300, 140, 24],
-  [1250, 380, 160, 24],
-  [1500, 300, 140, 24],
-  [1760, 230, 150, 24],
-  [2400, 360, 170, 24],
-  [2680, 280, 160, 24],
+  // terra (y=480): zona sicura iniziale lunga, poi fossi crescenti
+  [0, GROUND_Y, 760, 60], // ZONA SICURA: 0..760 (start a 120, niente fossi/nemici)
+  [820, GROUND_Y, 500, 60], // fosso 1 = 60px (didattico)
+  [1400, GROUND_Y, 580, 60], // fosso 2 = 80px
+  [2076, GROUND_Y, 1124, 60], // fosso 3 = 96px → tratto finale
+  // ledge raggiungibili (dislivelli ≤60px) per monete opzionali
+  [1120, 430, 110, 20],
+  [1680, 430, 110, 20],
+  [2300, 420, 120, 20],
+  [2480, 360, 110, 20], // raggiungibile dalla ledge a 420 (60px)
 ];
 
 const COINS: [number, number][] = [
-  [300, 430], [600, 340], [820, 260], [1000, 430],
-  [1330, 340], [1570, 260], [1835, 190], [2150, 430],
-  [2485, 320], [2760, 240],
+  [320, 440], [480, 440], [640, 440], // zona sicura: invitano a muoversi
+  [790, 420], // sopra il fosso 1: insegna il salto
+  [980, 440], [1175, 400], [1250, 440],
+  [1360, 420], // sopra il fosso 2
+  [1520, 440], [1680, 400], [1850, 440],
+  [2028, 420], // sopra il fosso 3
+  [2180, 440], [2480, 330], [2700, 440], [2900, 440],
 ];
 
+// Nemici: nessuno nella zona sicura; bounds entro i segmenti di terra.
 const ENEMIES: [number, number, number, number][] = [
-  [560, 470, 360, 820],
-  [1500, 470, 1150, 1980],
-  [2600, 470, 2300, 3050],
+  [1050, 470, 860, 1290],
+  [1700, 470, 1420, 1960],
+  [2600, 470, 2110, 3060],
 ];
 
-// Blocchi "?" (centro): colpiti da sotto danno un pezzo.
+// Blocchi "?" (centro), colpibili da sotto: y=360 → raggiungibili.
 const QBLOCKS: [number, number][] = [
-  [700, 360], [1450, 360], [2520, 330],
+  [980, 360], [1750, 360], [2200, 360],
 ];
 
 const START = { x: 120, y: 470 };
-const FLAG = { x: 3060, y: 480 };
+const FLAG = { x: 3120, y: 480 };
 
 export class GameScene extends Phaser.Scene {
   private player!: Player;
@@ -103,6 +111,24 @@ export class GameScene extends Phaser.Scene {
 
     this.buildHud();
     this.setupAudio();
+    this.buildHint();
+  }
+
+  /** Aiuto iniziale ai comandi, sparisce dopo pochi secondi. */
+  private buildHint(): void {
+    const touch = this.sys.game.device.input.touch && !this.sys.game.device.os.desktop;
+    const msg = touch
+      ? '◀ ▶ muovi   ·   tocca SALTA per saltare'
+      : '←  →  muovi   ·   ↑ / SPAZIO per saltare';
+    const hint = this.add
+      .text(this.cameras.main.width / 2, 96, msg, {
+        fontFamily: 'monospace', fontSize: '22px', color: '#ffffff',
+        stroke: '#1a1c2c', strokeThickness: 4, align: 'center',
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(900);
+    this.tweens.add({ targets: hint, alpha: 0, delay: 4500, duration: 1200, onComplete: () => hint.destroy() });
   }
 
   // --- Audio ----------------------------------------------------------------
@@ -312,10 +338,10 @@ export class GameScene extends Phaser.Scene {
 
   // --- Loop principale ------------------------------------------------------
 
-  update(): void {
+  update(_time: number, delta: number): void {
     this.updateParallax();
     if (this.state === 'play') {
-      this.player.update(this.readInput());
+      this.player.update(this.readInput(), delta);
       this.patrolEnemies();
       if (this.player.y > FALL_DEATH_Y) this.killPlayer();
     }
@@ -332,9 +358,9 @@ export class GameScene extends Phaser.Scene {
     const left = this.cursors.left.isDown || this.touch.left;
     const right = this.cursors.right.isDown || this.touch.right;
     const jumpHeld = this.cursors.up.isDown || this.keyJump.isDown || this.touch.jump;
-    const jump = jumpHeld && !this.prevJumpHeld;
+    const jumpPressed = jumpHeld && !this.prevJumpHeld;
     this.prevJumpHeld = jumpHeld;
-    return { left, right, jump };
+    return { left, right, jumpHeld, jumpPressed };
   }
 
   private patrolEnemies(): void {

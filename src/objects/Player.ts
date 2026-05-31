@@ -5,12 +5,17 @@ import { TEX } from '../gfx/sprites';
 export type InputState = {
   left: boolean;
   right: boolean;
-  jump: boolean; // true solo nel frame in cui si preme (edge)
+  jumpHeld: boolean; // pulsante/tasto salto tenuto premuto
+  jumpPressed: boolean; // edge: true solo nel frame in cui si preme
 };
 
 const SPEED = 200;
 const JUMP_VELOCITY = -470;
 const SCALE = 2; // intero → pixel netti
+
+// Margini "perdonanti" per un salto reattivo (in ms):
+const COYOTE = 110; // si può saltare per un attimo dopo aver lasciato il bordo
+const BUFFER = 130; // un salto premuto poco prima di toccare terra "scatta" all'atterraggio
 
 /**
  * Pezz: corre, salta, con animazioni (idle/corsa/salto), squash & stretch
@@ -18,6 +23,8 @@ const SCALE = 2; // intero → pixel netti
  */
 export class Player extends Phaser.Physics.Arcade.Sprite {
   private wasOnFloor = false;
+  private coyote = 0;
+  private buffer = 0;
   private dust: Phaser.GameObjects.Particles.ParticleEmitter;
 
   constructor(scene: Phaser.Scene, x: number, y: number) {
@@ -53,7 +60,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.play(ANIM.idle);
   }
 
-  update(input: InputState): void {
+  update(input: InputState, dt: number): void {
     const body = this.body as Phaser.Physics.Arcade.Body;
     const onFloor = body.blocked.down || body.touching.down;
 
@@ -68,10 +75,16 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
       if (Math.abs(body.velocity.x) < 8) this.setVelocityX(0);
     }
 
-    if (input.jump && onFloor) {
+    // --- salto reattivo: coyote-time + jump-buffer + ripetizione tenendo premuto ---
+    this.coyote = onFloor ? COYOTE : Math.max(0, this.coyote - dt);
+    this.buffer = input.jumpPressed ? BUFFER : Math.max(0, this.buffer - dt);
+    const wantJump = input.jumpHeld || this.buffer > 0;
+    if (wantJump && this.coyote > 0) {
       this.setVelocityY(JUMP_VELOCITY);
       this.squash(0.78, 1.22);
       this.emit('jump'); // la scena lo usa per il suono
+      this.coyote = 0;
+      this.buffer = 0;
     }
 
     if (onFloor && !this.wasOnFloor) this.squash(1.25, 0.8);

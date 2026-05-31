@@ -1,9 +1,10 @@
 import Phaser from 'phaser';
 
 /**
- * Controlli touch on-screen (solo per dispositivi touch).
- * Tre pulsanti fissi alla camera: ◀ ▶ e SALTA.
- * Espone lo stato "tenuto premuto"; l'edge del salto lo calcola la scena.
+ * Controlli touch on-screen (solo su dispositivi touch).
+ * Zone di tocco GRANDI e generose: ◀ ▶ in basso a sinistra, SALTA a destra.
+ * Espone lo stato "tenuto premuto"; coyote/buffer e l'auto-hop li gestisce
+ * il Player, così il salto è reattivo anche tenendo premuto.
  */
 export class TouchControls {
   left = false;
@@ -13,58 +14,58 @@ export class TouchControls {
   private readonly enabled: boolean;
 
   constructor(scene: Phaser.Scene) {
-    // Abilita più tocchi simultanei (muovere + saltare insieme).
-    scene.input.addPointer(2);
+    scene.input.addPointer(2); // più tocchi insieme (muovere + saltare)
 
     this.enabled =
       scene.sys.game.device.input.touch && !scene.sys.game.device.os.desktop;
     if (!this.enabled) return;
 
-    const { width, height } = scene.scale;
-    const r = Math.round(Math.min(width, height) * 0.09); // raggio adattivo
-    const pad = r * 1.6;
-    const y = height - pad;
+    const W = scene.scale.width;
+    const H = scene.scale.height;
 
-    this.makeButton(scene, pad, y, r, '◀', () => (this.left = true), () => (this.left = false));
-    this.makeButton(scene, pad * 2.7, y, r, '▶', () => (this.right = true), () => (this.right = false));
-    this.makeButton(scene, width - pad, y, r, '⤒', () => (this.jump = true), () => (this.jump = false));
+    // Direzionali in basso a sinistra (due zone affiancate).
+    this.makeZone(scene, W * 0.02, H * 0.56, W * 0.17, H * 0.42, '◀', (v) => (this.left = v));
+    this.makeZone(scene, W * 0.20, H * 0.56, W * 0.17, H * 0.42, '▶', (v) => (this.right = v));
+    // Salto: grande area in basso a destra.
+    this.makeZone(scene, W * 0.64, H * 0.50, W * 0.34, H * 0.48, 'SALTA', (v) => (this.jump = v));
   }
 
-  private makeButton(
+  private makeZone(
     scene: Phaser.Scene,
-    x: number,
-    y: number,
-    r: number,
+    x: number, y: number, w: number, h: number,
     glyph: string,
-    onDown: () => void,
-    onUp: () => void
+    set: (v: boolean) => void
   ): void {
-    const circle = scene.add
-      .circle(x, y, r, 0xffffff, 0.18)
-      .setStrokeStyle(2, 0xffffff, 0.45)
+    // Area di tocco invisibile ma generosa (tutto il rettangolo).
+    const zone = scene.add
+      .zone(x, y, w, h)
+      .setOrigin(0, 0)
       .setScrollFactor(0)
       .setDepth(1000)
-      .setInteractive({ useHandCursor: true });
+      .setInteractive();
 
+    // Pulsante visivo al centro della zona.
+    const cx = x + w / 2;
+    const cy = y + h / 2;
+    const r = Math.min(w, h) * 0.42;
+    const circle = scene.add
+      .circle(cx, cy, r, 0xffffff, 0.16)
+      .setStrokeStyle(3, 0xffffff, 0.5)
+      .setScrollFactor(0)
+      .setDepth(1000);
     scene.add
-      .text(x, y, glyph, { fontSize: `${Math.round(r * 1.1)}px`, color: '#ffffff' })
+      .text(cx, cy, glyph, { fontFamily: 'monospace', fontSize: `${Math.round(r * 0.7)}px`, color: '#ffffff' })
       .setOrigin(0.5)
-      .setAlpha(0.7)
+      .setAlpha(0.8)
       .setScrollFactor(0)
       .setDepth(1001);
 
-    const press = () => {
-      onDown();
-      circle.setFillStyle(0xffffff, 0.35);
-    };
-    const release = () => {
-      onUp();
-      circle.setFillStyle(0xffffff, 0.18);
-    };
+    const press = () => { set(true); circle.setFillStyle(0xffffff, 0.34); };
+    const release = () => { set(false); circle.setFillStyle(0xffffff, 0.16); };
 
-    circle.on('pointerdown', press);
-    circle.on('pointerup', release);
-    circle.on('pointerout', release);
-    circle.on('pointerupoutside', release);
+    zone.on('pointerdown', press);
+    zone.on('pointerup', release);
+    zone.on('pointerout', release);
+    zone.on('pointerupoutside', release);
   }
 }
