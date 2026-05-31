@@ -1,0 +1,20 @@
+{
+  "name": "super-pezz",
+  "version": "0.1.0",
+  "description": "Super Pezz — un platform/adventure 2D giocabile da browser (desktop + iPhone via Safari).",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "phaser": "^3.80.1"
+  },
+  "devDependencies": {
+    "puppeteer-core": "^23.11.1",
+    "typescript": "^5.4.5",
+    "vite": "^5.2.0"
+  }
+}
