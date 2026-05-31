@@ -2,16 +2,16 @@ import Phaser from 'phaser';
 import { Player, type InputState } from '../objects/Player';
 import { TouchControls } from '../ui/TouchControls';
 import { TEX } from '../gfx/sprites';
+import { BG } from '../gfx/background';
 
 const WORLD_W = 3200;
-const WORLD_H = 540; // altezza visibile
-const FALL_DEATH_Y = 720; // sotto questa quota = caduto nel vuoto
+const WORLD_H = 540;
+const FALL_DEATH_Y = 720;
 
-// Livello disegnato a mano. Piattaforme in top-left (x, y, larghezza, altezza).
 const PLATFORMS: [number, number, number, number][] = [
-  [0, 480, 900, 60], // terra 1
-  [1100, 480, 1000, 60], // terra 2
-  [2250, 480, 950, 60], // terra 3 (finale)
+  [0, 480, 900, 60],
+  [1100, 480, 1000, 60],
+  [2250, 480, 950, 60],
   [520, 380, 160, 24],
   [760, 300, 140, 24],
   [1250, 380, 160, 24],
@@ -21,18 +21,21 @@ const PLATFORMS: [number, number, number, number][] = [
   [2680, 280, 160, 24],
 ];
 
-// Monete / "pezzi" da raccogliere (centro).
 const COINS: [number, number][] = [
   [300, 430], [600, 340], [820, 260], [1000, 430],
   [1330, 340], [1570, 260], [1835, 190], [2150, 430],
   [2485, 320], [2760, 240],
 ];
 
-// Nemici: x, y, e range di pattugliamento [minX, maxX].
 const ENEMIES: [number, number, number, number][] = [
-  [560, 470, 360, 820], // lontano dallo spawn: niente agguato iniziale
+  [560, 470, 360, 820],
   [1500, 470, 1150, 1980],
   [2600, 470, 2300, 3050],
+];
+
+// Blocchi "?" (centro): colpiti da sotto danno un pezzo.
+const QBLOCKS: [number, number][] = [
+  [700, 360], [1450, 360], [2520, 330],
 ];
 
 const START = { x: 120, y: 470 };
@@ -43,9 +46,14 @@ export class GameScene extends Phaser.Scene {
   private platforms!: Phaser.GameObjects.Group;
   private coins!: Phaser.Physics.Arcade.StaticGroup;
   private enemies!: Phaser.Physics.Arcade.Group;
+  private qblocks!: Phaser.Physics.Arcade.StaticGroup;
   private touch!: TouchControls;
   private cursors!: Phaser.Types.Input.Keyboard.CursorKeys;
   private keyJump!: Phaser.Input.Keyboard.Key;
+
+  private clouds!: Phaser.GameObjects.TileSprite;
+  private hillsFar!: Phaser.GameObjects.TileSprite;
+  private hillsNear!: Phaser.GameObjects.TileSprite;
 
   private score = 0;
   private totalCoins = 0;
@@ -71,23 +79,22 @@ export class GameScene extends Phaser.Scene {
 
     this.buildBackground();
     this.buildPlatforms();
+    this.buildQBlocks();
     this.buildCoins();
     this.buildEnemies();
 
-    // Player — creato PRIMA del traguardo, che ne registra l'overlap.
     this.player = new Player(this, START.x, START.y);
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
     this.cameras.main.setDeadzone(180, 120);
 
     this.buildFlag();
 
-    // Collisioni
     this.physics.add.collider(this.player, this.platforms);
     this.physics.add.collider(this.enemies, this.platforms);
+    this.physics.add.collider(this.player, this.qblocks, this.hitBlock, undefined, this);
     this.physics.add.overlap(this.player, this.coins, this.collectCoin, undefined, this);
     this.physics.add.overlap(this.player, this.enemies, this.hitEnemy, undefined, this);
 
-    // Input
     this.cursors = this.input.keyboard!.createCursorKeys();
     this.keyJump = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.touch = new TouchControls(this);
@@ -98,28 +105,48 @@ export class GameScene extends Phaser.Scene {
   // --- Costruzione mondo ----------------------------------------------------
 
   private buildBackground(): void {
-    // Cielo
+    const cam = this.cameras.main;
     this.add
-      .rectangle(0, 0, WORLD_W, WORLD_H, 0x6ec0ff)
+      .image(0, 0, BG.sky)
+      .setOrigin(0, 0)
+      .setDisplaySize(cam.width, cam.height)
+      .setScrollFactor(0)
+      .setDepth(-20);
+
+    this.clouds = this.add
+      .tileSprite(0, 0, cam.width, 160, BG.clouds)
       .setOrigin(0, 0)
       .setScrollFactor(0)
-      .setDepth(-10);
-    // Nuvole in parallax leggera
-    for (const [x, y, s] of [[150, 90, 1], [480, 140, 0.7], [820, 80, 1.2], [700, 200, 0.6]] as const) {
-      const cloud = this.add.container(x, y);
-      cloud.add(this.add.circle(0, 0, 26 * s, 0xffffff, 0.9));
-      cloud.add(this.add.circle(28 * s, 6 * s, 20 * s, 0xffffff, 0.9));
-      cloud.add(this.add.circle(-26 * s, 8 * s, 18 * s, 0xffffff, 0.9));
-      cloud.setScrollFactor(0.3).setDepth(-9);
-    }
+      .setDepth(-15);
+
+    this.hillsFar = this.add
+      .tileSprite(0, cam.height, cam.width, 220, BG.hillsFar)
+      .setOrigin(0, 1)
+      .setScrollFactor(0)
+      .setDepth(-12);
+
+    this.hillsNear = this.add
+      .tileSprite(0, cam.height, cam.width, 220, BG.hillsNear)
+      .setOrigin(0, 1)
+      .setScrollFactor(0)
+      .setDepth(-11);
   }
 
   private buildPlatforms(): void {
     this.platforms = this.add.group();
     for (const [x, y, w, h] of PLATFORMS) {
       const ts = this.add.tileSprite(x + w / 2, y + h / 2, w, h, TEX.ground);
-      this.physics.add.existing(ts, true); // corpo statico
+      this.physics.add.existing(ts, true);
       this.platforms.add(ts);
+    }
+  }
+
+  private buildQBlocks(): void {
+    this.qblocks = this.physics.add.staticGroup();
+    for (const [x, y] of QBLOCKS) {
+      const b = this.qblocks.create(x, y, TEX.qblock) as Phaser.Physics.Arcade.Sprite;
+      b.setScale(2).refreshBody();
+      b.setData('used', false);
     }
   }
 
@@ -127,17 +154,12 @@ export class GameScene extends Phaser.Scene {
     this.coins = this.physics.add.staticGroup();
     for (const [x, y] of COINS) {
       const coin = this.coins.create(x, y, TEX.coin) as Phaser.Physics.Arcade.Sprite;
-      coin.setScale(3).refreshBody();
+      coin.setScale(3).refreshBody().setDepth(1);
       this.tweens.add({
-        targets: coin,
-        scaleX: 0.4 * 3,
-        duration: 700,
-        yoyo: true,
-        repeat: -1,
-        ease: 'Sine.inOut',
+        targets: coin, scaleX: 0.4 * 3, duration: 700, yoyo: true, repeat: -1, ease: 'Sine.inOut',
       });
     }
-    this.totalCoins = COINS.length;
+    this.totalCoins = COINS.length + QBLOCKS.length;
   }
 
   private buildEnemies(): void {
@@ -160,15 +182,9 @@ export class GameScene extends Phaser.Scene {
   }
 
   private buildHud(): void {
-    const style = { fontFamily: 'monospace', fontSize: '24px', color: '#ffffff' };
-    this.scoreText = this.add
-      .text(16, 14, '', style)
-      .setScrollFactor(0)
-      .setDepth(900);
-    this.livesText = this.add
-      .text(16, 44, '', style)
-      .setScrollFactor(0)
-      .setDepth(900);
+    const style = { fontFamily: 'monospace', fontSize: '24px', color: '#ffffff', stroke: '#1a1c2c', strokeThickness: 4 };
+    this.scoreText = this.add.text(16, 14, '', style).setScrollFactor(0).setDepth(900);
+    this.livesText = this.add.text(16, 44, '', style).setScrollFactor(0).setDepth(900);
     this.refreshHud();
   }
 
@@ -186,17 +202,33 @@ export class GameScene extends Phaser.Scene {
     this.refreshHud();
   };
 
+  private hitBlock: Phaser.Types.Physics.Arcade.ArcadePhysicsCallback = (_p, b) => {
+    const block = b as Phaser.Physics.Arcade.Sprite;
+    const pBody = this.player.body as Phaser.Physics.Arcade.Body;
+    const fromBelow = (pBody.blocked.up || pBody.touching.up) && block.y < this.player.y - 20;
+    if (!fromBelow || block.getData('used')) return;
+    block.setData('used', true);
+    block.setTexture(TEX.qblockUsed);
+    // sobbalzo del blocco
+    this.tweens.add({ targets: block, y: block.y - 8, duration: 90, yoyo: true, ease: 'Quad.out' });
+    // pezzo che salta fuori
+    const coin = this.add.sprite(block.x, block.y - 20, TEX.coin).setScale(3).setDepth(5);
+    this.tweens.add({
+      targets: coin, y: coin.y - 40, alpha: 0, duration: 500, ease: 'Quad.out',
+      onComplete: () => coin.destroy(),
+    });
+    this.score += 1;
+    this.refreshHud();
+  };
+
   private hitEnemy: Phaser.Types.Physics.Arcade.ArcadePhysicsCallback = (_p, e) => {
     if (this.state !== 'play') return;
     const enemy = e as Phaser.Physics.Arcade.Sprite;
     const pBody = this.player.body as Phaser.Physics.Arcade.Body;
-    // Schiacciamento: Pezz sta scendendo ed è sopra il nemico.
     const stomping = pBody.velocity.y > 60 && this.player.y < enemy.y - 10;
     if (stomping) {
       enemy.disableBody(true, true);
       this.player.bounce();
-      this.score += 1; // bonus
-      this.refreshHud();
     } else {
       this.killPlayer();
     }
@@ -206,10 +238,7 @@ export class GameScene extends Phaser.Scene {
     if (this.state !== 'play') return;
     this.lives -= 1;
     this.refreshHud();
-    if (this.lives <= 0) {
-      this.gameOver();
-      return;
-    }
+    if (this.lives <= 0) { this.gameOver(); return; }
     this.cameras.main.flash(200, 255, 80, 80);
     this.player.setVelocity(0, 0);
     this.player.setPosition(START.x, START.y);
@@ -219,7 +248,7 @@ export class GameScene extends Phaser.Scene {
     if (this.state !== 'play') return;
     this.state = 'won';
     this.player.setVelocity(0, 0);
-    const bonus = this.score === this.totalCoins ? '  PERFETTO! Tutti i pezzi!' : '';
+    const bonus = this.score === this.totalCoins ? '  PERFETTO!' : '';
     this.showOverlay(`HAI VINTO!${bonus}`, '#ffe14d');
   }
 
@@ -232,29 +261,14 @@ export class GameScene extends Phaser.Scene {
 
   private showOverlay(title: string, color: string): void {
     const cam = this.cameras.main;
-    this.add
-      .rectangle(cam.width / 2, cam.height / 2, cam.width, cam.height, 0x000000, 0.55)
-      .setScrollFactor(0)
-      .setDepth(2000);
-    this.add
-      .text(cam.width / 2, cam.height / 2 - 30, title, {
-        fontFamily: 'monospace',
-        fontSize: '52px',
-        color,
-        fontStyle: 'bold',
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(2001);
-    this.add
-      .text(cam.width / 2, cam.height / 2 + 40, 'Tocca o premi INVIO per rigiocare', {
-        fontFamily: 'monospace',
-        fontSize: '22px',
-        color: '#ffffff',
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(2001);
+    this.add.rectangle(cam.width / 2, cam.height / 2, cam.width, cam.height, 0x000000, 0.55)
+      .setScrollFactor(0).setDepth(2000);
+    this.add.text(cam.width / 2, cam.height / 2 - 30, title, {
+      fontFamily: 'monospace', fontSize: '52px', color, fontStyle: 'bold',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(2001);
+    this.add.text(cam.width / 2, cam.height / 2 + 40, 'Tocca o premi INVIO per rigiocare', {
+      fontFamily: 'monospace', fontSize: '22px', color: '#ffffff',
+    }).setOrigin(0.5).setScrollFactor(0).setDepth(2001);
 
     const restart = () => this.scene.restart();
     this.input.once('pointerdown', restart);
@@ -264,6 +278,7 @@ export class GameScene extends Phaser.Scene {
   // --- Loop principale ------------------------------------------------------
 
   update(): void {
+    this.updateParallax();
     if (this.state === 'play') {
       this.player.update(this.readInput());
       this.patrolEnemies();
@@ -271,12 +286,18 @@ export class GameScene extends Phaser.Scene {
     }
   }
 
+  private updateParallax(): void {
+    const sx = this.cameras.main.scrollX;
+    this.clouds.tilePositionX = sx * 0.1;
+    this.hillsFar.tilePositionX = sx * 0.25;
+    this.hillsNear.tilePositionX = sx * 0.5;
+  }
+
   private readInput(): InputState {
     const left = this.cursors.left.isDown || this.touch.left;
     const right = this.cursors.right.isDown || this.touch.right;
-    const jumpHeld =
-      this.cursors.up.isDown || this.keyJump.isDown || this.touch.jump;
-    const jump = jumpHeld && !this.prevJumpHeld; // edge: solo alla pressione
+    const jumpHeld = this.cursors.up.isDown || this.keyJump.isDown || this.touch.jump;
+    const jump = jumpHeld && !this.prevJumpHeld;
     this.prevJumpHeld = jumpHeld;
     return { left, right, jump };
   }
@@ -288,13 +309,8 @@ export class GameScene extends Phaser.Scene {
       const body = e.body as Phaser.Physics.Arcade.Body;
       const minX = e.getData('minX') as number;
       const maxX = e.getData('maxX') as number;
-      if (e.x <= minX && body.velocity.x < 0) {
-        e.setVelocityX(70);
-        e.setFlipX(true);
-      } else if (e.x >= maxX && body.velocity.x > 0) {
-        e.setVelocityX(-70);
-        e.setFlipX(false);
-      }
+      if (e.x <= minX && body.velocity.x < 0) { e.setVelocityX(70); e.setFlipX(true); }
+      else if (e.x >= maxX && body.velocity.x > 0) { e.setVelocityX(-70); e.setFlipX(false); }
     }
   }
 }
