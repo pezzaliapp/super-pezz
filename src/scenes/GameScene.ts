@@ -3,6 +3,7 @@ import { Player, type InputState } from '../objects/Player';
 import { TouchControls } from '../ui/TouchControls';
 import { TEX } from '../gfx/sprites';
 import { BG } from '../gfx/background';
+import { GameAudio } from '../audio/GameAudio';
 
 const WORLD_W = 3200;
 const WORLD_H = 540;
@@ -63,6 +64,7 @@ export class GameScene extends Phaser.Scene {
 
   private scoreText!: Phaser.GameObjects.Text;
   private livesText!: Phaser.GameObjects.Text;
+  private audio?: GameAudio;
 
   constructor() {
     super('Game');
@@ -100,6 +102,37 @@ export class GameScene extends Phaser.Scene {
     this.touch = new TouchControls(this);
 
     this.buildHud();
+    this.setupAudio();
+  }
+
+  // --- Audio ----------------------------------------------------------------
+
+  private setupAudio(): void {
+    const ctx = (this.sound as Phaser.Sound.WebAudioSoundManager).context;
+    if (!ctx) return; // fallback HTML5 audio: niente sintesi
+    const audio = new GameAudio(ctx);
+    this.audio = audio;
+
+    // suoni di gioco
+    this.player.on('jump', () => audio.jump());
+
+    // musica: parte dopo lo sblocco (iOS richiede un primo tocco)
+    if (this.sound.locked) this.sound.once(Phaser.Sound.Events.UNLOCKED, () => audio.startMusic());
+    else audio.startMusic();
+
+    // mute: tasto M + bottone tappabile (utile su iPhone)
+    const btn = this.add
+      .text(this.cameras.main.width - 16, 14, '🔊', { fontSize: '28px' })
+      .setOrigin(1, 0)
+      .setScrollFactor(0)
+      .setDepth(900)
+      .setInteractive({ useHandCursor: true });
+    const toggle = () => btn.setText(audio.toggleMute() ? '🔇' : '🔊');
+    btn.on('pointerdown', toggle);
+    this.input.keyboard!.addKey('M').on('down', toggle);
+
+    // alla chiusura/restart della scena: ferma la musica (il timer è globale)
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => audio.stopMusic());
   }
 
   // --- Costruzione mondo ----------------------------------------------------
@@ -198,6 +231,7 @@ export class GameScene extends Phaser.Scene {
   private collectCoin: Phaser.Types.Physics.Arcade.ArcadePhysicsCallback = (_p, c) => {
     const coin = c as Phaser.Physics.Arcade.Sprite;
     coin.disableBody(true, true);
+    this.audio?.coin();
     this.score += 1;
     this.refreshHud();
   };
@@ -209,6 +243,7 @@ export class GameScene extends Phaser.Scene {
     if (!fromBelow || block.getData('used')) return;
     block.setData('used', true);
     block.setTexture(TEX.qblockUsed);
+    this.audio?.coin();
     // sobbalzo del blocco
     this.tweens.add({ targets: block, y: block.y - 8, duration: 90, yoyo: true, ease: 'Quad.out' });
     // pezzo che salta fuori

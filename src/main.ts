@@ -23,4 +23,7 @@ const config: Phaser.Types.Core.GameConfig = {
   scene: [PreloadScene, GameScene],
 };
 
-new Phaser.Game(config);
+const game = new Phaser.Game(config);
+
+// Handle globale: comodo per debug dalla console del browser.
+(window as unknown as { game: Phaser.Game }).game = game;

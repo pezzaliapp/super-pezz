@@ -71,6 +71,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     if (input.jump && onFloor) {
       this.setVelocityY(JUMP_VELOCITY);
       this.squash(0.78, 1.22);
+      this.emit('jump'); // la scena lo usa per il suono
     }
 
     if (onFloor && !this.wasOnFloor) this.squash(1.25, 0.8);
